@@ -3,6 +3,7 @@ from flask import Flask, render_template, request
 import hashlib
 import sqlite3
 import pyotp
+import qrcode
 
 app = Flask(__name__)
 
@@ -21,6 +22,14 @@ def register():
 
         secret_key = pyotp.random_base32()
 
+        totp_uri = pyotp.totp.TOTP(secret_key).provisioning_uri(
+            name=username,
+            issuer_name="CryptographyProject"
+        )
+
+        qr = qrcode.make(totp_uri)
+        qr.save(f"static/{username}_qr.png")
+
         conn = sqlite3.connect("users.db")
         cursor = conn.cursor()
 
@@ -33,11 +42,12 @@ def register():
         conn.close()
 
         return f"""
-        User Registered Successfully <br><br>
+         <h2>User Registered Successfully</h2>
 
-        Username: {username} <br>
-        Secret Key: {secret_key}
-        """
+         <p>Scan this QR Code using Google Authenticator</p>
+
+         <img src="/static/{username}_qr.png" width="250">
+         """
 
     return render_template("register.html")
 
