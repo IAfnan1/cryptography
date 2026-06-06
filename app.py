@@ -2,16 +2,23 @@ from flask import Flask, render_template, request
 import hashlib
 import pyotp
 import qrcode
+import time
 
 from database import (
-
     create_database,
-
     add_user,
-
-    get_secret_key
-
+    get_user,
+    get_secret_key,
+    increase_failed_attempts,
+    reset_failed_attempts,
+    is_account_locked,
+    lock_account,
+    store_used_otp,
+    is_used_otp
 )
+
+MAX_FAILED = 5
+LOCK_MINUTES = 5
 
 app = Flask(__name__)
 
@@ -81,6 +88,72 @@ def show_totp(username):
     <h3>Current OTP: {current_code}</h3>
     """
 
+@app.route("/login")
+def login_page():
+    return render_template("login.html")
+
+@app.route("/login", methods=["POST"])
+def login():
+
+    username = request.form["username"]
+    password = request.form["password"]
+    otp = request.form["otp"]
+
+    if is_account_locked(username):
+        return "Account Locked. Try again later."
+
+    user = get_user(username)
+
+    if user is None:
+        return "User Not Found"
+
+    stored_password_hash = user[1]
+
+    password_hash = hashlib.sha256(
+        password.encode()
+    ).hexdigest()
+
+    if password_hash != stored_password_hash:
+
+        increase_failed_attempts(username)
+
+        if user[3] + 1 >= MAX_FAILED:
+            lock_account(username, LOCK_MINUTES)
+
+            return (
+                f"Account Locked due to failed attempts. "
+                f"Try again in {LOCK_MINUTES} minutes."
+            )
+
+        return "Invalid Password"
+
+    secret_key = get_secret_key(username)
+
+    if secret_key is None:
+        return "Secret Key Not Found"
+
+    totp = pyotp.TOTP(secret_key)
+
+    current_time = int(time.time())
+
+    if is_used_otp(username, otp):
+        return "OTP Already Used"
+
+    if totp.verify(otp):
+
+        reset_failed_attempts(username)
+
+        store_used_otp(
+            username,
+            otp,
+            current_time
+        )
+
+        return "Access Granted"
+
+    increase_failed_attempts(username)
+
+    return "Invalid OTP"
 
 if __name__ == "__main__":
     app.run(debug=True)
